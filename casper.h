@@ -1,6 +1,7 @@
 /* casper.h - bot based on sprout
 
-
+10/24/17
+- add gettime_d()
 
 */
 
@@ -29,8 +30,11 @@
 #define JOYSTICK_MAX 32767
 
 void delay(long ms);
-void run_to_distance_inches(FILE *fenc, double ldist_in, double rdist_in, int lspeed_max, int rspeed_max);
-void run_to_distance_ticks(FILE *fenc, long ldist, long rdist, int lspeed_max, int rspeed_max);
+double gettime_d();
+void run_to_distance_inches_old(FILE *fenc, double ldist_in, double rdist_in, int lspeed_max, int rspeed_max);
+void run_to_distance_ticks_old(FILE *fenc, long ldist, long rdist, int lspeed_max, int rspeed_max);
+void run_to_distance_inches(FILE *fenc, double ldist_in, double rdist_in, double speed_in);
+void run_to_distance_ticks(FILE *fenc, long ldist, long rdist, double speed);
 void exiting(void);
 void signal_handler(int signal_number);
 

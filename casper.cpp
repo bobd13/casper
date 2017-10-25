@@ -17,6 +17,14 @@ For use with the Adafruit Motor Shield v2
 - looks good at slow speed, but quite a bit off at high speed
 - speed_ratio should be a PID output based on delta, need more gain when further apart
 
+10/24/17 BD
+- begin adding PID against target location
+Start with assumed straight line
+- add gettime_d()
+- within 1 tick of each other at speed (ticks/sec) of 100, 200
+- 500 ticks/sec - within 1 count until last few loops, then up to 2, but coasted to 3
+- looks like right side reached target and started to slow, left coasts more
+- need brake
 
 BUILD: g++ -o casper casper.cpp ../Adafruit_Motor_Shield_V2_library/Adafruit_MotorShield.o ../Adafruit_Motor_Shield_V2_library/utility/Adafruit_MS_PWMServoDriver.o -lm -SDL2
 
@@ -30,6 +38,7 @@ BUILD: g++ -o casper casper.cpp ../Adafruit_Motor_Shield_V2_library/Adafruit_Mot
 #include <math.h>
 #include <signal.h>
 #include <string.h>
+#include <sys/time.h>
 #include <SDL2/SDL.h>   /* All SDL App's need this */
 #include "../Adafruit_Motor_Shield_V2_library/Adafruit_MotorShield.h"
 #include "../Adafruit_Motor_Shield_V2_library/utility/Adafruit_MS_PWMServoDriver.h"
@@ -38,6 +47,8 @@ BUILD: g++ -o casper casper.cpp ../Adafruit_Motor_Shield_V2_library/Adafruit_Mot
 #define FILE_COUNTR "/dev/quad_enc"
 
 #define P 1
+#define I 0.001
+
 #define SPEED_MAX 255
 #define SPEED_MIN 20
 
@@ -58,7 +69,21 @@ void delay(long ms)
   nanosleep(&ts, NULL);
 }
 
-void run_to_distance_inches(FILE *fenc, double ldist_in, double rdist_in, int lspeed_max, int rspeed_max)
+double gettime_d()
+{
+	double t0;
+	struct timeval tv0;
+
+	gettimeofday(&tv0, NULL);
+	t0 = 1.0 * tv0.tv_sec + (1.0 * tv0.tv_usec) / 1000000.0;
+	// printf("seconds: %ld\n", tv0.tv_sec);
+	// printf("usecs:   %ld\n", tv0.tv_usec);
+	// printf("time:    %lf\n", t0);
+
+	return t0;
+}
+
+void run_to_distance_inches_old(FILE *fenc, double ldist_in, double rdist_in, int lspeed_max, int rspeed_max)
 {
 	long ldist;
 	long rdist;
@@ -66,10 +91,10 @@ void run_to_distance_inches(FILE *fenc, double ldist_in, double rdist_in, int ls
 	ldist = ldist_in * TICKS_PER_INCH;
 	rdist = rdist_in * TICKS_PER_INCH;
 
-	run_to_distance_ticks(fenc, ldist, rdist, lspeed_max, rspeed_max);
+	run_to_distance_ticks_old(fenc, ldist, rdist, lspeed_max, rspeed_max);
 }
 
-void run_to_distance_ticks(FILE *fenc, long ldist, long rdist, int lspeed_max, int rspeed_max)
+void run_to_distance_ticks_old(FILE *fenc, long ldist, long rdist, int lspeed_max, int rspeed_max)
 {
   long countr_0;
   long countl_0;
@@ -174,6 +199,163 @@ void run_to_distance_ticks(FILE *fenc, long ldist, long rdist, int lspeed_max, i
 
 }
 
+void run_to_distance_inches(FILE *fenc, double ldist_in, double rdist_in, double speed_in)
+{
+	long ldist;
+	long rdist;
+	double speed;
+	
+	speed = speed_in * TICKS_PER_INCH;
+	ldist = ldist_in * TICKS_PER_INCH;
+	rdist = rdist_in * TICKS_PER_INCH;
+
+	run_to_distance_ticks(fenc, ldist, rdist, speed);
+}
+
+/*
+	speed is in ticks / second
+ */
+void run_to_distance_ticks(FILE *fenc, long ldist, long rdist, double speed)
+{
+  long countr_0;
+  long countl_0;
+  long countr;
+  long countl;
+  long countr_raw;
+  long countl_raw;
+  int i;
+  int lspeed = 0;
+  int rspeed = 0;
+	double lspeed_d = 0.0;
+	double rspeed_d = 0.0;
+	double speed_ratio; // multiplier for lspeed to balance motors
+	double t0;
+	double tnow;
+	long rdist_now;
+	long ldist_now;
+	double lIsum;
+	double rIsum;
+	double lerr;
+	double rerr;
+	
+  fscanf(fenc, "%ld %ld", &countr_0, &countl_0);
+  printf("countr_0: %ld countl_0: %ld\n", countr_0, countl_0);
+  
+	if(ldist >= 0) {
+		motorLeft->run(FORWARD);
+	} else {
+		motorLeft->run(BACKWARD);
+	}
+	if(rdist >= 0) {
+		motorRight->run(FORWARD);
+	} else {
+		motorRight->run(BACKWARD);
+	}
+
+	motorLeft->setSpeed(lspeed);
+  motorRight->setSpeed(rspeed);
+
+	// do all the calculations with the double versions of speed, then change to int before setting motors
+	countl = 0;
+  countr = 0;
+	t0 = gettime_d();
+	tnow = t0;
+	lerr = rerr = 0.0;
+	lIsum = rIsum = 0.0;
+  while((countr < rdist) || (countl < ldist)) {
+    fscanf(fenc, "%ld %ld", &countr_raw, &countl_raw);
+		countl = countl_raw - countl_0;
+    countr = countr_raw - countr_0;
+		printf("r: %ld  l: %ld\n", countr, countl);
+
+		// where should it be now?
+		tnow = gettime_d();
+		ldist_now = speed * (tnow - t0);
+		if(ldist_now > ldist) {
+			ldist_now = ldist;
+		}
+		rdist_now = speed * (tnow - t0);
+		if(rdist_now > rdist) {
+			rdist_now = rdist;
+		}
+		
+		// 1st, PID the motors
+		lerr = ldist_now - countl;
+		rerr = rdist_now - countr;
+		lIsum += lerr;
+		rIsum += rerr;
+    lspeed_d = P * lerr + I * lIsum;
+    rspeed_d = P * rerr + I * rIsum;
+		printf("1 rspeed: %lf  lspeed: %lf\n", rspeed_d, lspeed_d);
+
+		/*
+		// 2nd, adjust for speed difference of left and right motors
+		speed_ratio = ((1.0 * countr)/(1.0 * rdist)) / ((1.0 * countl)/(1.0 * (ldist)));
+		printf("speed_ratio: %lf\n", speed_ratio);
+		lspeed_d *= speed_ratio;
+		printf("2 rspeed: %lf  lspeed: %lf\n", rspeed_d, lspeed_d);
+		
+		// 3rd, limit the speed, but keep the balance by scaling the other motor also
+    if(lspeed_d > SPEED_MAX) {
+			// scale right speed to maintain balance above
+			rspeed_d *= (1.0 * SPEED_MAX) / lspeed_d;
+      lspeed_d = SPEED_MAX;
+    }
+
+    if(rspeed_d > SPEED_MAX) {
+			// scale left speed to maintain balance above
+			lspeed_d *= (1.0 * SPEED_MAX) / rspeed_d;
+      rspeed_d = SPEED_MAX;
+    }
+		printf("3 rspeed: %lf  lspeed: %lf\n", rspeed_d, lspeed_d);
+
+		// finally, make sure motors still running >= min
+    if(lspeed_d < SPEED_MIN) {
+			// scale right speed to maintain balance above
+			// rspeed_d *= (1.0 * SPEED_MIN) / lspeed_d;
+      lspeed_d = SPEED_MIN * speed_ratio;
+    }
+
+    if(rspeed_d < SPEED_MIN) {
+			// scale left speed to maintain balance above
+			// lspeed_d *= (1.0 * SPEED_MIN) / rspeed_d;
+      rspeed_d = SPEED_MIN;
+    }
+		printf("4 rspeed: %lf  lspeed: %lf\n", rspeed_d, lspeed_d);
+		*/
+		
+		lspeed = int(lspeed_d);
+		rspeed = int(rspeed_d);
+		// Limit them
+		if(lspeed > SPEED_MAX) {
+			lspeed = SPEED_MAX;
+		}
+		if(rspeed > SPEED_MAX) {
+			rspeed = SPEED_MAX;
+		}
+		motorLeft->setSpeed(lspeed);
+    motorRight->setSpeed(rspeed);
+    delay(10);
+  }
+  
+  // turn off motor
+	motorLeft->setSpeed(0);
+	motorRight->setSpeed(0);
+
+  fscanf(fenc, "%ld %ld", &countr_raw, &countl_raw);
+  countr = countr_raw - countr_0;
+  countl = countl_raw - countl_0;
+  printf("moved: %ld %ld\n", countr, countl);
+
+  delay(1000);
+
+  fscanf(fenc, "%ld %ld", &countr_raw, &countl_raw);
+  countr = countr_raw - countr_0;
+  countl = countl_raw - countl_0;
+  printf("final moved: %ld %ld\n", countr, countl);
+
+}
+
 void exiting(void)
 {
   printf("exiting...\n");
@@ -216,6 +398,11 @@ main(int argc, char *argv[]) {
 	double rabs;
 	double absmax;
 	
+	
+
+
+
+
 	printf("Initializing SDL.\n");
     
 	if (SDL_Init( SDL_INIT_JOYSTICK ) < 0) {
@@ -311,7 +498,7 @@ main(int argc, char *argv[]) {
 					done = 1;
 				}
 				if(event.jbutton.button == 2) {
-					run_to_distance_ticks(fid_countr, 5 * TICKS_PER_REV, 5 * TICKS_PER_REV, 50, 50);
+					run_to_distance_ticks(fid_countr, 5 * TICKS_PER_REV, 5 * TICKS_PER_REV, 500);
 				}
 				break;
 
@@ -394,105 +581,6 @@ main(int argc, char *argv[]) {
 
 	/* End loop here */
 
-	exit(0);
 
-
-	/*
-	countr = 0;
-  target = REVOLUTIONS * TICKS_PER_REV;
-  printf("target: %ld\n", target);
-  while(countr < target) {
-    fscanf(fid_countr, "%ld", &countr_raw);
-    countr = countr_raw - countr_0;
-    speed = P * (target - countr);
-    if(speed > SPEED_MAX) {
-      speed = SPEED_MAX;
-    }
-    if(speed < SPEED_MIN) {
-      speed = SPEED_MIN;
-    }
-    // motorLeft->setSpeed(speed);
-    motorRight->setSpeed(speed);
-    delay(10);
-    if(fabs(countr % 96) < 1) {
-      printf("%ld\n", countr);
-    }
-  }
-  
-  // turn off motor
-  motorLeft->run(RELEASE);
-  motorRight->run(RELEASE);
-
-  fscanf(fid_countr, "%ld", &countr_raw);
-  countr = countr_raw - countr_0;
-  printf("release: %ld\n", countr);
-
-  delay(1000);
-
-  fscanf(fid_countr, "%ld", &countr_raw);
-  countr = countr_raw - countr_0;
-  printf("%ld\n", countr);
-
-  fcloseall();
-  exit(0);
-  
-
-  // motorLeft->setSpeed(50);
-  motorRight->setSpeed(50);
-  motorLeft->run(FORWARD);
-  motorRight->run(FORWARD);
-
-  sleep(5);
-
-  motorLeft->run(RELEASE);
-  motorRight->run(RELEASE);
-
-  fcloseall();
-  exit(0);
-  
-  while(1) {
-    uint8_t i;
-  
-    // Serial.print("tick");
-    printf("tick\n");
-    
-    motorLeft->run(FORWARD);
-    motorRight->run(FORWARD);
-    for (i=0; i<100; i++) {
-      motorLeft->setSpeed(i);  
-      motorRight->setSpeed(i);  
-      delay(10);
-    }
-    delay(100);
-    for (i=100; i!=0; i--) {
-      motorLeft->setSpeed(i);  
-      motorRight->setSpeed(i);  
-      delay(10);
-    }
-  
-    // Serial.print("tock");
-    printf("tock\n");
-    
-    motorLeft->run(BACKWARD);
-    motorRight->run(BACKWARD);
-    for (i=0; i<100; i++) {
-      motorLeft->setSpeed(i);  
-      motorRight->setSpeed(i);  
-      delay(10);
-    }
-    delay(100);
-    for (i=100; i!=0; i--) {
-      motorLeft->setSpeed(i);  
-      motorRight->setSpeed(i);  
-      delay(10);
-    }
-
-    // Serial.print("tech");
-    printf("tech\n");
-    motorLeft->run(RELEASE);
-    motorRight->run(RELEASE);
-    delay(1000);
-  }
-	*/
 }
 
