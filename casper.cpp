@@ -26,6 +26,29 @@ Start with assumed straight line
 - looks like right side reached target and started to slow, left coasts more
 - need brake
 
+10/26/17 BD
+- running on the floor, the right wheel seemed too powerful and slipped on atartup
+The tail hook caught on tiles and made strong steer
+- glued half a ping-pog ball to tail hook
+Now runs pretty straight and consistent in the hall
+only tried with the bot centered left-right on a tile
+- remove run_to_distance_inches_old() and run_to_distance_ticks_old
+- attempt circle by scaling ldist and rdist for internal and external radii
+- wheel separation (center to center) 5.75"
+- need to calc left and right target distances using separate speeds in run_to_distance_ticks()
+- while testing, noticed doesn't always complete (hear whining, no response to button push)
+- basically works, runs a little too far
+
+TODO:
+- measure circle diameter and compare to plan
+- add turn_left() or something similar
+- add timer or something to get out of run_to... that doesn't complete
+- rewrite such that run_to_... is called once per main loop
+- put together whole drive path!
+
+next up: will add run_arc_ticks() and run_arc_inches()
+
+
 BUILD: g++ -o casper casper.cpp ../Adafruit_Motor_Shield_V2_library/Adafruit_MotorShield.o ../Adafruit_Motor_Shield_V2_library/utility/Adafruit_MS_PWMServoDriver.o -lm -SDL2
 
 
@@ -83,128 +106,13 @@ double gettime_d()
 	return t0;
 }
 
-void run_to_distance_inches_old(FILE *fenc, double ldist_in, double rdist_in, int lspeed_max, int rspeed_max)
-{
-	long ldist;
-	long rdist;
-
-	ldist = ldist_in * TICKS_PER_INCH;
-	rdist = rdist_in * TICKS_PER_INCH;
-
-	run_to_distance_ticks_old(fenc, ldist, rdist, lspeed_max, rspeed_max);
-}
-
-void run_to_distance_ticks_old(FILE *fenc, long ldist, long rdist, int lspeed_max, int rspeed_max)
-{
-  long countr_0;
-  long countl_0;
-  long countr;
-  long countl;
-  long countr_raw;
-  long countl_raw;
-  int i;
-  int lspeed = 0;
-  int rspeed = 0;
-	double lspeed_d = 0.0;
-	double rspeed_d = 0.0;
-	double speed_ratio; // multiplier for lspeed to balance motors
-
-  fscanf(fenc, "%ld %ld", &countr_0, &countl_0);
-  printf("countr_0: %ld countl_0: %ld\n", countr_0, countl_0);
-  
-	if(ldist >= 0) {
-		motorLeft->run(FORWARD);
-	} else {
-		motorLeft->run(BACKWARD);
-	}
-	if(rdist >= 0) {
-		motorRight->run(FORWARD);
-	} else {
-		motorRight->run(BACKWARD);
-	}
-
-	motorLeft->setSpeed(lspeed_max);
-  motorRight->setSpeed(rspeed_max);
-
-	// do all the calculations with the double versions of speed, then change to int before setting motors
-	countl = 0;
-  countr = 0;
-  while((countr < rdist) || (countl < ldist)) {
-    fscanf(fenc, "%ld %ld", &countr_raw, &countl_raw);
-		countl = countl_raw - countl_0;
-    countr = countr_raw - countr_0;
-		printf("r: %ld  l: %ld\n", countr, countl);
-		
-		// 1st, PID the motors
-    lspeed_d = P * (ldist - countl);
-    rspeed_d = P * (rdist - countr);
-		printf("1 rspeed: %lf  lspeed: %lf\n", rspeed_d, lspeed_d);
-		
-		// 2nd, adjust for speed difference of left and right motors
-		speed_ratio = ((1.0 * countr)/(1.0 * rdist)) / ((1.0 * countl)/(1.0 * (ldist)));
-		printf("speed_ratio: %lf\n", speed_ratio);
-		lspeed_d *= speed_ratio;
-		printf("2 rspeed: %lf  lspeed: %lf\n", rspeed_d, lspeed_d);
-		
-		// 3rd, limit the speed, but keep the balance by scaling the other motor also
-    if(lspeed_d > lspeed_max) {
-			// scale right speed to maintain balance above
-			rspeed_d *= (1.0 * lspeed_max) / lspeed_d;
-      lspeed_d = lspeed_max;
-    }
-
-    if(rspeed_d > rspeed_max) {
-			// scale left speed to maintain balance above
-			lspeed_d *= (1.0 * rspeed_max) / rspeed_d;
-      rspeed_d = rspeed_max;
-    }
-		printf("3 rspeed: %lf  lspeed: %lf\n", rspeed_d, lspeed_d);
-
-		// finally, make sure motors still running >= min
-    if(lspeed_d < SPEED_MIN) {
-			// scale right speed to maintain balance above
-			// rspeed_d *= (1.0 * SPEED_MIN) / lspeed_d;
-      lspeed_d = SPEED_MIN * speed_ratio;
-    }
-
-    if(rspeed_d < SPEED_MIN) {
-			// scale left speed to maintain balance above
-			// lspeed_d *= (1.0 * SPEED_MIN) / rspeed_d;
-      rspeed_d = SPEED_MIN;
-    }
-		printf("4 rspeed: %lf  lspeed: %lf\n", rspeed_d, lspeed_d);
-
-		lspeed = int(lspeed_d);
-		rspeed = int(rspeed_d);
-		motorLeft->setSpeed(lspeed);
-    motorRight->setSpeed(rspeed);
-    delay(10);
-  }
-  
-  // turn off motor
-	motorLeft->setSpeed(0);
-	motorRight->setSpeed(0);
-
-  fscanf(fenc, "%ld %ld", &countr_raw, &countl_raw);
-  countr = countr_raw - countr_0;
-  countl = countl_raw - countl_0;
-  printf("moved: %ld %ld\n", countr, countl);
-
-  delay(1000);
-
-  fscanf(fenc, "%ld %ld", &countr_raw, &countl_raw);
-  countr = countr_raw - countr_0;
-  countl = countl_raw - countl_0;
-  printf("final moved: %ld %ld\n", countr, countl);
-
-}
-
 void run_to_distance_inches(FILE *fenc, double ldist_in, double rdist_in, double speed_in)
 {
 	long ldist;
 	long rdist;
 	double speed;
 	
+	printf("run_to_distance_inches(l: %8.6lf r:%8.6lf s:%8.6lf)\n", ldist_in, rdist_in, speed_in);
 	speed = speed_in * TICKS_PER_INCH;
 	ldist = ldist_in * TICKS_PER_INCH;
 	rdist = rdist_in * TICKS_PER_INCH;
@@ -237,8 +145,29 @@ void run_to_distance_ticks(FILE *fenc, long ldist, long rdist, double speed)
 	double rIsum;
 	double lerr;
 	double rerr;
+	double lspeed_target;
+	double rspeed_target;
+	double avg_speed_target;
 	
-  fscanf(fenc, "%ld %ld", &countr_0, &countl_0);
+	printf("run_to_distance_ticks(l: %6ld r:%6ld s:%8.6lf)\n", ldist, rdist, speed);
+	if(ldist == rdist) {
+		lspeed_target = speed;
+		rspeed_target = speed;
+	} else if(ldist == 0) {
+		lspeed_target = 0;
+		rspeed_target = speed;
+	} else if(rdist == 0) {
+		lspeed_target = speed;
+		rspeed_target = 0;
+	} else if(ldist > rdist) {
+		lspeed_target = speed;
+		rspeed_target = speed * ((1.0 * rdist) / (1.0 * ldist));
+	} if(ldist < rdist) {
+		lspeed_target = speed * ((1.0 * ldist) / (1.0 * rdist));
+		rspeed_target = speed;
+	}
+
+	fscanf(fenc, "%ld %ld", &countr_0, &countl_0);
   printf("countr_0: %ld countl_0: %ld\n", countr_0, countl_0);
   
 	if(ldist >= 0) {
@@ -270,11 +199,11 @@ void run_to_distance_ticks(FILE *fenc, long ldist, long rdist, double speed)
 
 		// where should it be now?
 		tnow = gettime_d();
-		ldist_now = speed * (tnow - t0);
+		ldist_now = lspeed_target * (tnow - t0);
 		if(ldist_now > ldist) {
 			ldist_now = ldist;
 		}
-		rdist_now = speed * (tnow - t0);
+		rdist_now = rspeed_target * (tnow - t0);
 		if(rdist_now > rdist) {
 			rdist_now = rdist;
 		}
@@ -494,11 +423,24 @@ main(int argc, char *argv[]) {
 			case SDL_JOYBUTTONDOWN:  /* Handle Joystick Button Presses */
 				/* code goes here */
 				printf("button %d pressed\n", event.jbutton.button);
-				if(event.jbutton.button == 3) {
-					done = 1;
+
+				if(event.jbutton.button == 0) {
+					// left turn
+					double radius = 24;
+					double lradius = radius - LR_WIDTH/2.0; 
+					double rradius = radius + LR_WIDTH/2.0;
+					// 90 degrees
+					double ldist = lradius * M_PI_2; 
+					double rdist = rradius * M_PI_2; 
+					run_to_distance_inches(fid_countr, ldist, rdist, 20);
 				}
+
 				if(event.jbutton.button == 2) {
 					run_to_distance_ticks(fid_countr, 5 * TICKS_PER_REV, 5 * TICKS_PER_REV, 500);
+				}
+
+				if(event.jbutton.button == 3) {
+					done = 1;
 				}
 				break;
 

@@ -2,6 +2,9 @@
 
 10/24/17
 - add gettime_d()
+10/26/17 BD
+- remove run_to_distance_inches_old() and run_to_distance_ticks_old
+- add LR_WIDTH
 
 */
 
@@ -25,14 +28,13 @@
 // left:
 // #define TICKS_PER_REV 195
 #define CIRCUMFERENCE_IN 8.125
-#define TICKS_PER_INCH (CIRCUMFERENCE_IN / (1.0 * TICKS_PER_REV))
+#define TICKS_PER_INCH ((1.0 * TICKS_PER_REV) / CIRCUMFERENCE_IN)
+#define LR_WIDTH 5.75
 
 #define JOYSTICK_MAX 32767
 
 void delay(long ms);
 double gettime_d();
-void run_to_distance_inches_old(FILE *fenc, double ldist_in, double rdist_in, int lspeed_max, int rspeed_max);
-void run_to_distance_ticks_old(FILE *fenc, long ldist, long rdist, int lspeed_max, int rspeed_max);
 void run_to_distance_inches(FILE *fenc, double ldist_in, double rdist_in, double speed_in);
 void run_to_distance_ticks(FILE *fenc, long ldist, long rdist, double speed);
 void exiting(void);
