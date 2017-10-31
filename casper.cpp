@@ -48,6 +48,19 @@ TODO:
 
 next up: will add run_arc_ticks() and run_arc_inches()
 
+10/29/17
+- added BRAKE to Adafruit Motorshield run()
+- add BRAKE to run_to_distance_ticks()
+- stops straighter
+- twists when startsup sometimes, also when catches on a tile
+- speed was 500, drop to 250
+- 90 degree arc looks good - a little too long, but stops abruptly
+
+10/20/17
+- add swivel rear wheel based on pinewood derby car wheel
+- still an issue
+- raise speed to 500 from 250 and check
+
 
 BUILD: g++ -o casper casper.cpp ../Adafruit_Motor_Shield_V2_library/Adafruit_MotorShield.o ../Adafruit_Motor_Shield_V2_library/utility/Adafruit_MS_PWMServoDriver.o -lm -SDL2
 
@@ -264,12 +277,25 @@ void run_to_distance_ticks(FILE *fenc, long ldist, long rdist, double speed)
 		}
 		motorLeft->setSpeed(lspeed);
     motorRight->setSpeed(rspeed);
-    delay(10);
+
+		if(countl >= ldist) {
+			motorLeft->setSpeed(0);
+			motorLeft->run(BRAKE);
+		}
+
+		if(countr >= rdist) {
+			motorRight->setSpeed(0);
+			motorRight->run(BRAKE);
+		}
+
+		delay(10);
   }
   
   // turn off motor
 	motorLeft->setSpeed(0);
+	motorLeft->run(BRAKE);
 	motorRight->setSpeed(0);
+	motorRight->run(BRAKE);
 
   fscanf(fenc, "%ld %ld", &countr_raw, &countl_raw);
   countr = countr_raw - countr_0;
@@ -437,6 +463,7 @@ main(int argc, char *argv[]) {
 
 				if(event.jbutton.button == 2) {
 					run_to_distance_ticks(fid_countr, 5 * TICKS_PER_REV, 5 * TICKS_PER_REV, 500);
+					// run_to_distance_ticks(fid_countr, 5 * TICKS_PER_REV, 5 * TICKS_PER_REV, 250);
 				}
 
 				if(event.jbutton.button == 3) {
