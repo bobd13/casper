@@ -5,6 +5,9 @@
 10/26/17 BD
 - remove run_to_distance_inches_old() and run_to_distance_ticks_old
 - add LR_WIDTH
+3/6/18 BD
+- add stop_after_maneuver()
+- add stop()
 
 */
 
@@ -35,6 +38,8 @@
 
 void delay(long ms);
 double gettime_d();
+void stop();
+void stop_after_maneuver(FILE *fenc, long countl_0, long countr_0);
 void run_to_distance_inches(FILE *fenc, double ldist_in, double rdist_in, double speed_in);
 void run_to_distance_ticks(FILE *fenc, long ldist, long rdist, double speed);
 void exiting(void);

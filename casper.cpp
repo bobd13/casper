@@ -61,8 +61,21 @@ next up: will add run_arc_ticks() and run_arc_inches()
 - still an issue
 - raise speed to 500 from 250 and check
 
+3/6/18
+- remove commented out blocks of code
+- move motor stop section at end of run_to_distance_ticks() to its own routine, stop_after_maneuver()
+- add stop()
 
-BUILD: g++ -o casper casper.cpp ../Adafruit_Motor_Shield_V2_library/Adafruit_MotorShield.o ../Adafruit_Motor_Shield_V2_library/utility/Adafruit_MS_PWMServoDriver.o -lm -SDL2
+
+BUILD: g++ -g -o casper casper.cpp ../Adafruit_Motor_Shield_V2_library/Adafruit_MotorShield.o ../Adafruit_Motor_Shield_V2_library/utility/Adafruit_MS_PWMServoDriver.o -lm -lSDL2 ; ls -lrt
+
+
+To run code:
+1 time after powerup:
+$ ./insmod.sh
+
+When ready to connect joystick:
+$ sudo ./zeemoted/zeemoted 
 
 
 */
@@ -117,6 +130,38 @@ double gettime_d()
 	// printf("time:    %lf\n", t0);
 
 	return t0;
+}
+
+void stop()
+{
+  // turn off motor
+	motorLeft->setSpeed(0);
+	motorLeft->run(BRAKE);
+	motorRight->setSpeed(0);
+	motorRight->run(BRAKE);
+}
+
+void stop_after_maneuver(FILE *fenc, long countl_0, long countr_0)
+{
+  long countr;
+  long countl;
+  long countr_raw;
+  long countl_raw;
+
+	stop();
+
+  fscanf(fenc, "%ld %ld", &countr_raw, &countl_raw);
+  countr = countr_raw - countr_0;
+  countl = countl_raw - countl_0;
+  printf("moved: %ld %ld\n", countr, countl);
+
+  delay(1000);
+
+  fscanf(fenc, "%ld %ld", &countr_raw, &countl_raw);
+  countr = countr_raw - countr_0;
+  countl = countl_raw - countl_0;
+  printf("final moved: %ld %ld\n", countr, countl);
+
 }
 
 void run_to_distance_inches(FILE *fenc, double ldist_in, double rdist_in, double speed_in)
@@ -230,42 +275,6 @@ void run_to_distance_ticks(FILE *fenc, long ldist, long rdist, double speed)
     rspeed_d = P * rerr + I * rIsum;
 		printf("1 rspeed: %lf  lspeed: %lf\n", rspeed_d, lspeed_d);
 
-		/*
-		// 2nd, adjust for speed difference of left and right motors
-		speed_ratio = ((1.0 * countr)/(1.0 * rdist)) / ((1.0 * countl)/(1.0 * (ldist)));
-		printf("speed_ratio: %lf\n", speed_ratio);
-		lspeed_d *= speed_ratio;
-		printf("2 rspeed: %lf  lspeed: %lf\n", rspeed_d, lspeed_d);
-		
-		// 3rd, limit the speed, but keep the balance by scaling the other motor also
-    if(lspeed_d > SPEED_MAX) {
-			// scale right speed to maintain balance above
-			rspeed_d *= (1.0 * SPEED_MAX) / lspeed_d;
-      lspeed_d = SPEED_MAX;
-    }
-
-    if(rspeed_d > SPEED_MAX) {
-			// scale left speed to maintain balance above
-			lspeed_d *= (1.0 * SPEED_MAX) / rspeed_d;
-      rspeed_d = SPEED_MAX;
-    }
-		printf("3 rspeed: %lf  lspeed: %lf\n", rspeed_d, lspeed_d);
-
-		// finally, make sure motors still running >= min
-    if(lspeed_d < SPEED_MIN) {
-			// scale right speed to maintain balance above
-			// rspeed_d *= (1.0 * SPEED_MIN) / lspeed_d;
-      lspeed_d = SPEED_MIN * speed_ratio;
-    }
-
-    if(rspeed_d < SPEED_MIN) {
-			// scale left speed to maintain balance above
-			// lspeed_d *= (1.0 * SPEED_MIN) / rspeed_d;
-      rspeed_d = SPEED_MIN;
-    }
-		printf("4 rspeed: %lf  lspeed: %lf\n", rspeed_d, lspeed_d);
-		*/
-		
 		lspeed = int(lspeed_d);
 		rspeed = int(rspeed_d);
 		// Limit them
@@ -280,35 +289,18 @@ void run_to_distance_ticks(FILE *fenc, long ldist, long rdist, double speed)
 
 		if(countl >= ldist) {
 			motorLeft->setSpeed(0);
-			motorLeft->run(BRAKE);
+			// motorLeft->run(BRAKE);
 		}
 
 		if(countr >= rdist) {
 			motorRight->setSpeed(0);
-			motorRight->run(BRAKE);
+			// motorRight->run(BRAKE);
 		}
 
 		delay(10);
   }
   
-  // turn off motor
-	motorLeft->setSpeed(0);
-	motorLeft->run(BRAKE);
-	motorRight->setSpeed(0);
-	motorRight->run(BRAKE);
-
-  fscanf(fenc, "%ld %ld", &countr_raw, &countl_raw);
-  countr = countr_raw - countr_0;
-  countl = countl_raw - countl_0;
-  printf("moved: %ld %ld\n", countr, countl);
-
-  delay(1000);
-
-  fscanf(fenc, "%ld %ld", &countr_raw, &countl_raw);
-  countr = countr_raw - countr_0;
-  countl = countl_raw - countl_0;
-  printf("final moved: %ld %ld\n", countr, countl);
-
+	// stop_after_maneuver(fenc, countl_0, countr_0);
 }
 
 void exiting(void)
@@ -353,11 +345,6 @@ main(int argc, char *argv[]) {
 	double rabs;
 	double absmax;
 	
-	
-
-
-
-
 	printf("Initializing SDL.\n");
     
 	if (SDL_Init( SDL_INIT_JOYSTICK ) < 0) {
@@ -459,11 +446,16 @@ main(int argc, char *argv[]) {
 					double ldist = lradius * M_PI_2; 
 					double rdist = rradius * M_PI_2; 
 					run_to_distance_inches(fid_countr, ldist, rdist, 20);
+					stop();
 				}
 
 				if(event.jbutton.button == 2) {
-					run_to_distance_ticks(fid_countr, 5 * TICKS_PER_REV, 5 * TICKS_PER_REV, 500);
+					// run_to_distance_ticks(fid_countr, 5 * TICKS_PER_REV, 5 * TICKS_PER_REV, 500);
 					// run_to_distance_ticks(fid_countr, 5 * TICKS_PER_REV, 5 * TICKS_PER_REV, 250);
+					run_to_distance_inches(fid_countr, 120, 120, 20);
+					stop();
+
+					delay(1000);
 				}
 
 				if(event.jbutton.button == 3) {
@@ -489,25 +481,6 @@ main(int argc, char *argv[]) {
 				break;
 			}
 		}
-
-		// calculate speeds from joystick
-		/* for test:
-		lspeed = x * SPEED_MAX / JOYSTICK_MAX;
-		rspeed = y * SPEED_MAX / JOYSTICK_MAX;
-		*/
-		/*
-			from http://home.kendra.com/mauser/joystick.html
-		V =(100-ABS(X)) * (Y/100) + Y;
-		W= (100-ABS(Y)) * (X/100) + X;
-		R = (V+W) /2;
-		L= (V-W)/2;
-		
-
-		v = (100 - abs(x)) * (y/100) + y;
-		w = (100 - abs(y)) * (x/100) + x;
-		rspeed = (v + w) / 2;
-		lspeed = (v - w) / 2;
-		*/
 
 		/*
 			https://electronics.stackexchange.com/questions/19669/algorithm-for-mixing-2-axis-analog-input-to-control-a-differential-motor-drive
